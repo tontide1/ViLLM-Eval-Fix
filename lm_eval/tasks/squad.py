@@ -14,6 +14,7 @@ also determine when no answer is supported by the paragraph and abstain from ans
 Homepage: https://rajpurkar.github.io/SQuAD-explorer/
 """
 import datasets
+import evaluate
 from math import exp
 from lm_eval.base import rf, Task
 from functools import partial
@@ -33,7 +34,7 @@ _CITATION = """
 
 
 def _squad_metric(predictions, references):
-    squad_metric = datasets.load_metric("squad_v2")
+    squad_metric = evaluate.load("squad_v2")
     return squad_metric.compute(predictions=predictions, references=references)
 
 

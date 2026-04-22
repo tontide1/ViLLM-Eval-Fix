@@ -30,7 +30,7 @@ to `lm_eval/tasks/__init__.py`.
 NOTE: GovReport may need `max_gen_toks` set larger for causal models.
 """
 from abc import abstractmethod
-from datasets import load_metric
+import evaluate
 from transformers import AutoTokenizer
 from lm_eval.base import rf, Task
 from lm_eval.metrics import mean
@@ -145,7 +145,7 @@ class _SCROLLSTask(Task):
     def __init__(self, no_metric=False):
         super().__init__()
         self.metric = (
-            load_metric(_download_metric(), config_name=self.DATASET_NAME)
+            evaluate.load(_download_metric(), config_name=self.DATASET_NAME)
             if not no_metric
             else None
         )
