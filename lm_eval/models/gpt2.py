@@ -3,6 +3,11 @@ import transformers
 from typing import Optional, Union
 from lm_eval.base import BaseLM
 
+try:
+    from transformers import BitsAndBytesConfig
+except ImportError:  # transformers < 4.30
+    BitsAndBytesConfig = None  # type: ignore
+
 
 def _get_dtype(dtype: Union[str, torch.dtype]) -> torch.dtype:
     """Converts `dtype` from `str` to torch.dtype when possible. Does not use an instantiated HF AutoConfig"""
@@ -30,6 +35,7 @@ class HFLM(BaseLM):
         max_batch_size=512,
         max_length=None,
         load_in_8bit: Optional[bool] = False,
+        load_in_4bit: Optional[bool] = False,
         trust_remote_code: Optional[bool] = False,
         dtype: Optional[Union[str, torch.dtype]] = "auto",
     ):
@@ -75,15 +81,46 @@ class HFLM(BaseLM):
                 )
             revision = revision + ("/" + subfolder if subfolder is not None else "")
 
-            # Initialize new model and tokenizer instances
+            # Use `quantization_config` (BitsAndBytesConfig) instead of passing
+            # `load_in_4bit` / `load_in_8bit` to `from_pretrained`: some
+            # `transformers` + model combos forward those kwargs into
+            # `PreTrainedModel.__init__` and raise.
+            model_kwargs = {
+                "low_cpu_mem_usage": low_cpu_mem_usage,
+                "revision": revision,
+                "torch_dtype": _get_dtype(dtype),
+                "trust_remote_code": trust_remote_code,
+            }
+            if load_in_4bit or load_in_8bit:
+                assert (
+                    transformers.__version__ >= "4.30.0"
+                ), "quantized loading requires transformers >= 4.30.0"
+                if BitsAndBytesConfig is None:
+                    if load_in_4bit:
+                        model_kwargs["load_in_4bit"] = True
+                    if load_in_8bit:
+                        model_kwargs["load_in_8bit"] = True
+                else:
+                    if load_in_4bit and load_in_8bit:
+                        raise ValueError(
+                            "Set only one of `load_in_4bit` or `load_in_8bit`."
+                        )
+                    if load_in_4bit:
+                        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                            load_in_4bit=True
+                        )
+                    else:
+                        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                            load_in_8bit=True
+                        )
+                model_kwargs["device_map"] = "auto"
+
             self.model = transformers.AutoModelForCausalLM.from_pretrained(
                 pretrained,
-                load_in_8bit=load_in_8bit,
-                low_cpu_mem_usage=low_cpu_mem_usage,
-                revision=revision,
-                torch_dtype=_get_dtype(dtype),
-                trust_remote_code=trust_remote_code,
-            ).to(self.device)
+                **model_kwargs,
+            )
+            if not (load_in_8bit or load_in_4bit):
+                self.model = self.model.to(self.device)
             self.tokenizer = transformers.AutoTokenizer.from_pretrained(
                 tokenizer if tokenizer else pretrained,
                 revision=revision,
